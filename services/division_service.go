@@ -1,21 +1,25 @@
 package services
 
 import (
-	"import-export/db"
-	"import-export/models"
-	"encoding/csv"
-	"sync"
-	"bytes"
-	"log"
-	"strconv"
-	"github.com/gofiber/fiber/v2"
-	"bufio"
+    "import-export/db"
+    "import-export/models"
+    "github.com/gofiber/fiber/v2"
+	"github.com/tealeg/xlsx"
+    "encoding/csv"
+    "log"
+    "strconv"
+    "sync"
+    "bytes"
+    "bufio"
+    "os" // Ensure this line is present
+	"strings" // Add this import
 )
-
-type DivisionService struct{}
+type DivisionService struct {
+    // Add necessary fields if needed
+}
 
 func NewDivisionService() *DivisionService {
-	return &DivisionService{}
+    return &DivisionService{}
 }
 
 // GetAllDivisions returns all divisions
@@ -168,4 +172,105 @@ func (s *DivisionService) exportDivisionsChunk(divisions []models.Division) ([]b
 	writer.Flush()
 
 	return buf.Bytes(), nil
+}
+
+
+func (s *DivisionService) ImportDivisions(filePath string) error {
+    // Determine file extension
+    if !isXlsx(filePath) {
+        return s.importCSV(filePath)
+    }
+
+    return s.importXLSX(filePath)
+}
+
+// Check if the file is an XLSX file
+func isXlsx(filePath string) bool {
+    return strings.HasSuffix(filePath, ".xlsx")
+}
+
+func (s *DivisionService) importXLSX(filePath string) error {
+    file, err := xlsx.OpenFile(filePath)
+    if err != nil {
+        log.Println("Error opening XLSX file:", err)
+        return err
+    }
+
+    var wg sync.WaitGroup
+    numWorkers := 10
+    recordsChannel := make(chan []string, len(file.Sheets[0].Rows))
+
+    for i := 0; i < numWorkers; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            for record := range recordsChannel {
+                if err := s.insertDivision(record); err != nil {
+                    log.Println("Error inserting division:", err)
+                }
+            }
+        }()
+    }
+
+    for _, row := range file.Sheets[0].Rows {
+        var record []string
+        for _, cell := range row.Cells {
+            record = append(record, cell.String())
+        }
+        recordsChannel <- record
+    }
+    close(recordsChannel)
+    wg.Wait()
+
+    return nil
+}
+
+func (s *DivisionService) importCSV(filePath string) error {
+    file, err := os.Open(filePath)
+    if err != nil {
+        log.Println("Error opening CSV file:", err)
+        return err
+    }
+    defer file.Close()
+
+    reader := csv.NewReader(file)
+    records, err := reader.ReadAll()
+    if err != nil {
+        log.Println("Error reading CSV file:", err)
+        return err
+    }
+
+    var wg sync.WaitGroup
+    numWorkers := 10
+    recordsChannel := make(chan []string, len(records))
+
+    for i := 0; i < numWorkers; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            for record := range recordsChannel {
+                if err := s.insertDivision(record); err != nil {
+                    log.Println("Error inserting division:", err)
+                }
+            }
+        }()
+    }
+
+    for _, record := range records {
+        recordsChannel <- record
+    }
+    close(recordsChannel)
+    wg.Wait()
+
+    return nil
+}
+
+func (s *DivisionService) insertDivision(record []string) error {
+    // Assume the division model has Name and Code fields, adjust as necessary
+    division := models.Division{Name: record[1]}
+    err := db.GetDB().Create(&division).Error
+    if err != nil {
+        log.Println("Error inserting division into DB:", err)
+    }
+    return err
 }

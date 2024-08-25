@@ -10,7 +10,10 @@ import (
 
 func main() {
 	// Initialize Fiber
-	app := fiber.New()
+	app := fiber.New(fiber.Config{
+        // Set the maximum allowed size for uploads to 100MB
+        BodyLimit: 100 * 1024 * 1024, // 100MB
+    })
 
 	
 	// Initialize database connection

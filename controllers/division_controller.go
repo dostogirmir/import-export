@@ -7,6 +7,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"import-export/models"
 	"import-export/services"
+	"os"
+	"log"
+	"strings" // Make sure this import is included
 )
 
 // Get all divisions
@@ -84,4 +87,44 @@ func DeleteDivision(c *fiber.Ctx) error {
 func ExportDivisions(c *fiber.Ctx) error {
 	divisionsService := services.NewDivisionService()
 	return divisionsService.ExportDivisions(c)
+}
+
+// sanitizeFilename sanitizes file names to avoid issues with file paths
+func sanitizeFilename(filename string) string {
+    // Replace invalid characters and avoid directory traversal
+    return strings.ReplaceAll(filename, "/", "_")
+}
+
+func ImportDivisions(c *fiber.Ctx) error {
+    file, err := c.FormFile("file")
+    if err != nil {
+        log.Println("Error getting file:", err)
+        return c.Status(fiber.StatusBadRequest).SendString("Failed to get file")
+    }
+
+    tempDir := "../temp/"
+    if err := os.MkdirAll(tempDir, os.ModePerm); err != nil {
+        log.Println("Error creating temp directory:", err)
+        return c.Status(fiber.StatusInternalServerError).SendString("Failed to create temp directory")
+    }
+
+    tempFile := tempDir + sanitizeFilename(file.Filename)
+    log.Println("Saving file to:", tempFile)
+    if err := c.SaveFile(file, tempFile); err != nil {
+        log.Println("Error saving file:", err)
+        return c.Status(fiber.StatusInternalServerError).SendString("Failed to save file")
+    }
+
+    divisionsService := services.NewDivisionService()
+    err = divisionsService.ImportDivisions(tempFile)
+    if err != nil {
+        log.Println("Error during import:", err)
+        return c.Status(fiber.StatusInternalServerError).SendString("Failed to import divisions")
+    }
+
+    if err := os.Remove(tempFile); err != nil {
+        log.Println("Error removing temp file:", err)
+    }
+
+    return c.SendString("Divisions imported successfully")
 }
