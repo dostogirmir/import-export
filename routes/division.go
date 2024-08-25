@@ -1,20 +1,18 @@
+// routes/division.go
 package routes
 
 import (
 	"github.com/gofiber/fiber/v2"
+	"import-export/controllers"
 )
 
-// SetupDivisionRoutes sets up routes related to division functionality.
-func SetupDivisionRoutes(app *fiber.App) {
-	app.Get("/divisions", getDivisions)
-	app.Post("/divisions", createDivision)
-	// Add other division routes here
-}
+func RegisterDivisionRoutes(app *fiber.App) {
+	divisionGroup := app.Group("/divisions")
 
-func getDivisions(c *fiber.Ctx) error {
-	return c.SendString("List of divisions")
-}
-
-func createDivision(c *fiber.Ctx) error {
-	return c.SendString("Create a division")
+	divisionGroup.Get("/", controllers.GetAllDivisions)
+	divisionGroup.Get("/:id", controllers.GetDivisionByID)
+	divisionGroup.Post("/", controllers.CreateDivision)
+	divisionGroup.Put("/:id", controllers.UpdateDivision)
+	divisionGroup.Delete("/:id", controllers.DeleteDivision)
+    divisionGroup.Get("/export/divisions", controllers.ExportDivisions)
 }
