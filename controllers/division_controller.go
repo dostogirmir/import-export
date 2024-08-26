@@ -7,7 +7,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"import-export/models"
 	"import-export/services"
-	"os"
 	"log"
 	"strings" // Make sure this import is included
 )
@@ -95,36 +94,26 @@ func sanitizeFilename(filename string) string {
     return strings.ReplaceAll(filename, "/", "_")
 }
 
+// ImportDivisions handles the CSV import request
 func ImportDivisions(c *fiber.Ctx) error {
+    // Retrieve the uploaded file
     file, err := c.FormFile("file")
     if err != nil {
-        log.Println("Error getting file:", err)
-        return c.Status(fiber.StatusBadRequest).SendString("Failed to get file")
+        return c.Status(fiber.StatusBadRequest).SendString("File upload error: " + err.Error())
     }
 
-    tempDir := "../temp/"
-    if err := os.MkdirAll(tempDir, os.ModePerm); err != nil {
-        log.Println("Error creating temp directory:", err)
-        return c.Status(fiber.StatusInternalServerError).SendString("Failed to create temp directory")
-    }
-
-    tempFile := tempDir + sanitizeFilename(file.Filename)
-    log.Println("Saving file to:", tempFile)
-    if err := c.SaveFile(file, tempFile); err != nil {
-        log.Println("Error saving file:", err)
-        return c.Status(fiber.StatusInternalServerError).SendString("Failed to save file")
-    }
-
-    divisionsService := services.NewDivisionService()
-    err = divisionsService.ImportDivisions(tempFile)
+    // Open the file
+    f, err := file.Open()
     if err != nil {
-        log.Println("Error during import:", err)
-        return c.Status(fiber.StatusInternalServerError).SendString("Failed to import divisions")
+        return c.Status(fiber.StatusInternalServerError).SendString("Error opening file: " + err.Error())
+    }
+    defer f.Close()
+
+    // Call the service to process the CSV file
+    if err := services.ProcessDivisionCSV(f); err != nil {
+        log.Printf("Error processing CSV: %v", err)
+        return c.Status(fiber.StatusInternalServerError).SendString("Error processing CSV file")
     }
 
-    if err := os.Remove(tempFile); err != nil {
-        log.Println("Error removing temp file:", err)
-    }
-
-    return c.SendString("Divisions imported successfully")
+    return c.SendString("File imported successfully")
 }

@@ -4,15 +4,14 @@ import (
     "import-export/db"
     "import-export/models"
     "github.com/gofiber/fiber/v2"
-	"github.com/tealeg/xlsx"
     "encoding/csv"
     "log"
     "strconv"
     "sync"
     "bytes"
     "bufio"
-    "os" // Ensure this line is present
-	"strings" // Add this import
+	"gorm.io/gorm"
+	"io"
 )
 type DivisionService struct {
     // Add necessary fields if needed
@@ -175,102 +174,85 @@ func (s *DivisionService) exportDivisionsChunk(divisions []models.Division) ([]b
 }
 
 
-func (s *DivisionService) ImportDivisions(filePath string) error {
-    // Determine file extension
-    if !isXlsx(filePath) {
-        return s.importCSV(filePath)
-    }
+const (
+    batchSize   = 20000 // Number of records per batch
+    workerCount = 5    // Number of concurrent workers for batch insertion
+)
 
-    return s.importXLSX(filePath)
-}
+// ProcessDivisionCSV processes the CSV file in a memory-efficient way
+func ProcessDivisionCSV(reader io.Reader) error {
+    db := db.GetDB() // Get the GORM database connection
+    csvReader := csv.NewReader(bufio.NewReader(reader))
 
-// Check if the file is an XLSX file
-func isXlsx(filePath string) bool {
-    return strings.HasSuffix(filePath, ".xlsx")
-}
-
-func (s *DivisionService) importXLSX(filePath string) error {
-    file, err := xlsx.OpenFile(filePath)
-    if err != nil {
-        log.Println("Error opening XLSX file:", err)
+    // Skip the header line
+    if _, err := csvReader.Read(); err != nil {
         return err
     }
 
     var wg sync.WaitGroup
-    numWorkers := 10
-    recordsChannel := make(chan []string, len(file.Sheets[0].Rows))
+    batchChan := make(chan []models.Division, workerCount) // Channel to hold batches
 
-    for i := 0; i < numWorkers; i++ {
+    // Start a fixed number of workers for inserting batches
+    for i := 0; i < workerCount; i++ {
         wg.Add(1)
-        go func() {
-            defer wg.Done()
-            for record := range recordsChannel {
-                if err := s.insertDivision(record); err != nil {
-                    log.Println("Error inserting division:", err)
-                }
-            }
-        }()
+        go worker(db, batchChan, &wg)
     }
 
-    for _, row := range file.Sheets[0].Rows {
-        var record []string
-        for _, cell := range row.Cells {
-            record = append(record, cell.String())
+    divisions := make([]models.Division, 0, batchSize)
+
+    // Read and process the file line-by-line
+    for {
+        line, err := csvReader.Read()
+        if err != nil {
+            if err.Error() == "EOF" {
+                break
+            }
+            log.Printf("Error reading line: %v", err)
+            continue
         }
-        recordsChannel <- record
+
+        // Parse CSV line to model
+        division := models.Division{
+            Name: line[1], 
+            // Add other fields accordingly
+        }
+
+        // Add to the current batch
+        divisions = append(divisions, division)
+
+        // If batch size is reached, send it to the channel and reset
+        if len(divisions) == batchSize {
+            batchChan <- divisions
+            divisions = make([]models.Division, 0, batchSize)
+        }
     }
-    close(recordsChannel)
-    wg.Wait()
+
+    // Send any remaining records in the last batch
+    if len(divisions) > 0 {
+        batchChan <- divisions
+    }
+
+    close(batchChan) // Close the channel to signal workers to stop
+    wg.Wait()        // Wait for all workers to finish
 
     return nil
 }
 
-func (s *DivisionService) importCSV(filePath string) error {
-    file, err := os.Open(filePath)
-    if err != nil {
-        log.Println("Error opening CSV file:", err)
-        return err
+// worker function for processing batch inserts concurrently
+func worker(db *gorm.DB, batchChan <-chan []models.Division, wg *sync.WaitGroup) {
+    defer wg.Done()
+
+    for divisions := range batchChan {
+        if err := bulkInsertDivisions(db, divisions); err != nil {
+            log.Printf("Error inserting batch: %v", err)
+        }
     }
-    defer file.Close()
-
-    reader := csv.NewReader(file)
-    records, err := reader.ReadAll()
-    if err != nil {
-        log.Println("Error reading CSV file:", err)
-        return err
-    }
-
-    var wg sync.WaitGroup
-    numWorkers := 10
-    recordsChannel := make(chan []string, len(records))
-
-    for i := 0; i < numWorkers; i++ {
-        wg.Add(1)
-        go func() {
-            defer wg.Done()
-            for record := range recordsChannel {
-                if err := s.insertDivision(record); err != nil {
-                    log.Println("Error inserting division:", err)
-                }
-            }
-        }()
-    }
-
-    for _, record := range records {
-        recordsChannel <- record
-    }
-    close(recordsChannel)
-    wg.Wait()
-
-    return nil
 }
 
-func (s *DivisionService) insertDivision(record []string) error {
-    // Assume the division model has Name and Code fields, adjust as necessary
-    division := models.Division{Name: record[1]}
-    err := db.GetDB().Create(&division).Error
-    if err != nil {
-        log.Println("Error inserting division into DB:", err)
+// bulkInsertDivisions inserts a batch of divisions into the database
+func bulkInsertDivisions(db *gorm.DB, divisions []models.Division) error {
+    if err := db.Create(&divisions).Error; err != nil {
+        return err
     }
-    return err
+    return nil
 }

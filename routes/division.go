@@ -15,5 +15,5 @@ func RegisterDivisionRoutes(app *fiber.App) {
 	divisionGroup.Put("/:id", controllers.UpdateDivision)
 	divisionGroup.Delete("/:id", controllers.DeleteDivision)
     divisionGroup.Post("/import", controllers.ImportDivisions)
-    divisionGroup.Get("/export/divisions", controllers.ExportDivisions)
+    divisionGroup.Get("/export", controllers.ExportDivisions)
 }
