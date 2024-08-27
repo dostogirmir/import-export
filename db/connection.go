@@ -1,4 +1,3 @@
-// db/connection.go
 package db
 
 import (
@@ -9,6 +8,7 @@ import (
 	"github.com/spf13/viper"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Config struct {
@@ -24,12 +24,9 @@ var (
 	err error
 )
 
-// InitDatabase initializes the database connection using environment variables
 func InitDatabase() error {
-	// Explicitly set the .env file location
+	// Load configuration from .env file
 	viper.SetConfigFile(".env")
-
-	// Load the .env file
 	err := viper.ReadInConfig()
 	if err != nil {
 		return fmt.Errorf("error reading .env file: %w", err)
@@ -41,10 +38,7 @@ func InitDatabase() error {
 		return fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Log the configuration to ensure values are correctly loaded
-	log.Printf("DB Config: %+v\n", config)
-
-	// Check if the necessary configuration is populated
+	// Validate configuration
 	if config.Username == "" || config.Host == "" || config.Port == 0 || config.Name == "" {
 		return fmt.Errorf("database configuration is incomplete")
 	}
@@ -52,28 +46,32 @@ func InitDatabase() error {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
 		config.Username, config.Password, config.Host, config.Port, config.Name)
 
-	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	// Create a new GORM instance with custom logger and config
+	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{
+		Logger: logger.New(log.New(log.Writer(), "gorm:", log.LstdFlags), logger.Config{
+			SlowThreshold: 200 * time.Millisecond,
+			LogLevel:      logger.Warn,
+		}),
+	})
 	if err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)
 	}
 
-	// Configure the connection pool
+	// Configure connection pool
 	sqlDB, err := db.DB()
 	if err != nil {
 		return fmt.Errorf("failed to get sql.DB from GORM DB: %w", err)
 	}
 
-	// Connection pool settings
-	sqlDB.SetMaxOpenConns(100)                // Increase to handle more concurrent connections
-	sqlDB.SetMaxIdleConns(20)                 // Increase to keep more idle connections open
-	sqlDB.SetConnMaxLifetime(30 * time.Minute) // Reduce lifetime to refresh stale connections
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetMaxIdleConns(20)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
 	log.Println("Connected to the database successfully")
 
 	return nil
 }
 
-// GetDB returns the initialized GORM DB instance
 func GetDB() *gorm.DB {
 	return db
 }

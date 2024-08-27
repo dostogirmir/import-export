@@ -251,8 +251,22 @@ func worker(db *gorm.DB, batchChan <-chan []models.Division, wg *sync.WaitGroup)
 
 // bulkInsertDivisions inserts a batch of divisions into the database
 func bulkInsertDivisions(db *gorm.DB, divisions []models.Division) error {
-    if err := db.Create(&divisions).Error; err != nil {
-        return err
+    tx := db.Begin()
+    defer tx.Rollback()
+
+    for i := 0; i < len(divisions); i += 1000 {
+        chunk := divisions[i:min(i+1000, len(divisions))]
+        if err := tx.CreateInBatches(&chunk, 1000).Error; err != nil {
+            return err
+        }
     }
-    return nil
+
+    return tx.Commit().Error
+}
+
+func min(a, b int) int {
+    if a < b {
+        return a
+    }
+    return b
 }
