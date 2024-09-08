@@ -241,92 +241,59 @@ const (
 
 // ProcessDivisionCSV processes the CSV file in a memory-efficient way
 func ProcessDivisionCSV(reader io.Reader) error {
-    db := db.GetDB() // Get the GORM database connection
-    csvReader := csv.NewReader(bufio.NewReader(reader))
+    db, csvReader := db.GetDB(), csv.NewReader(bufio.NewReader(reader))
 
-    // Skip the header line
     if _, err := csvReader.Read(); err != nil {
         return err
     }
 
+    batchChan := make(chan []models.Division, workerCount)
     var wg sync.WaitGroup
-    batchChan := make(chan []models.Division, workerCount) // Channel to hold batches
 
-    // Start a fixed number of workers for inserting batches
     for i := 0; i < workerCount; i++ {
         wg.Add(1)
-        go worker(db, batchChan, &wg)
+        go func() {
+            defer wg.Done()
+            for divisions := range batchChan {
+                if err := bulkInsertDivisions(db, divisions); err != nil {
+                    log.Printf("Batch insert error: %v", err)
+                }
+            }
+        }()
     }
 
     divisions := make([]models.Division, 0, batchSize)
-
-    // Read and process the file line-by-line
-    for {
-        line, err := csvReader.Read()
-        if err != nil {
-            if err.Error() == "EOF" {
-                break
-            }
-            log.Printf("Error reading line: %v", err)
-            continue
-        }
-
-        // Parse CSV line to model
-        division := models.Division{
-            Name: line[0], 
-            // Add other fields accordingly
-        }
-
-        // Add to the current batch
-        divisions = append(divisions, division)
-
-        // If batch size is reached, send it to the channel and reset
+    for line, err := csvReader.Read(); err == nil; line, err = csvReader.Read() {
+        divisions = append(divisions, models.Division{
+            Name: line[0],
+        })
         if len(divisions) == batchSize {
             batchChan <- divisions
             divisions = make([]models.Division, 0, batchSize)
         }
     }
 
-    // Send any remaining records in the last batch
     if len(divisions) > 0 {
         batchChan <- divisions
     }
-
-    close(batchChan) // Close the channel to signal workers to stop
-    wg.Wait()        // Wait for all workers to finish
+    
+    close(batchChan)
+    wg.Wait()
 
     return nil
 }
 
-// worker function for processing batch inserts concurrently
-func worker(db *gorm.DB, batchChan <-chan []models.Division, wg *sync.WaitGroup) {
-    defer wg.Done()
-
-    for divisions := range batchChan {
-        if err := bulkInsertDivisions(db, divisions); err != nil {
-            log.Printf("Error inserting batch: %v", err)
-        }
-    }
-}
-
 // bulkInsertDivisions inserts a batch of divisions into the database
 func bulkInsertDivisions(db *gorm.DB, divisions []models.Division) error {
-    tx := db.Begin()
-    defer tx.Rollback()
-
     for i := 0; i < len(divisions); i += 1000 {
-        chunk := divisions[i:min(i+1000, len(divisions))]
-        if err := tx.CreateInBatches(&chunk, 1000).Error; err != nil {
+        end := i + 1000
+        if end > len(divisions) {
+            end = len(divisions) // Ensure we don't go beyond the slice bounds
+        }
+        chunk := divisions[i:end]
+        if err := db.CreateInBatches(&chunk, 1000).Error; err != nil {
             return err
         }
     }
-
-    return tx.Commit().Error
-}
-
-func min(a, b int) int {
-    if a < b {
-        return a
-    }
-    return b
+    return nil
 }
