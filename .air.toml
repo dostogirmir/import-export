@@ -1,0 +1,17 @@
+# Config for Air
+[build]
+bin = "ispa-import-export"
+cmd = "go build -o ./tmp/ispa-import-export ./cmd/main.go"  # Build command points to cmd/main.go
+full_bin = "APP_ENV=dev ./tmp/ispa-import-export"
+delay = 1000
+
+[directories]
+watch_dir = ["./"] # Directories to watch
+excluded_dir = ["tmp", "vendor"] # Directories to exclude
+
+[files]
+include_ext = ["go", "tpl", "html"] # File extensions to include
+exclude_ext = ["md", "json"] # File extensions to exclude
+
+[misc]
+clean_on_exit = true # Clean up binary on exit

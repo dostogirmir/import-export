@@ -1,12 +1,12 @@
 package services
 
 import (
-    "import-export/db"
-    "import-export/models"
+    "ispa-import-export/db"
+    "ispa-import-export/models"
     "github.com/gofiber/fiber/v2"
     "encoding/csv"
     "log"
-    "strconv"
+    // "strconv"
     "sync"
     "bytes"
     "bufio"
@@ -70,8 +70,68 @@ func DeleteDivision(id uint) error {
 	return nil
 }
 
+// BulkDeleteDivisionsResponse deletes multiple divisions by their IDs in batches and returns a response.
+func BulkDeleteDivisionsResponse(ids []int) (map[string]interface{}, error) {
+    batchSize := 10000             // Batch size to process IDs in chunks
+    numWorkers := 5                // Number of concurrent workers
+
+    var wg sync.WaitGroup
+    sem := make(chan struct{}, numWorkers) // Semaphore to limit concurrent workers
+    deleteCount := 0 // Count of deleted records
+    var mu sync.Mutex // Mutex to protect shared resources
+
+    for i := 0; i < len(ids); i += batchSize {
+        end := i + batchSize
+        if end > len(ids) {
+            end = len(ids)
+        }
+        batchIds := ids[i:end]
+
+        wg.Add(1)
+        sem <- struct{}{}
+
+        go func(batchIds []int) {
+            defer wg.Done()
+            defer func() { <-sem }()
+
+            if err := deleteBatch(batchIds); err != nil {
+                log.Printf("Error deleting batch: %v\n", err)
+                return
+            }
+
+            // Update the delete count
+            mu.Lock()
+            deleteCount += len(batchIds)
+            mu.Unlock()
+
+        }(batchIds)
+    }
+
+    wg.Wait()
+
+    // Prepare a response
+    response := map[string]interface{}{
+        "deleted_records": deleteCount,
+    }
+
+    return response, nil
+}
+
+// deleteBatch deletes a batch of divisions by their IDs.
+func deleteBatch(ids []int) error {
+    tx := db.GetDB().Begin() // Start a new transaction
+
+    // Use a single delete statement with IN clause for efficiency
+    if err := tx.Where("id IN ?", ids).Delete(&models.Division{}).Error; err != nil {
+        tx.Rollback() // Rollback in case of error
+        return err
+    }
+
+    return tx.Commit().Error // Commit the transaction
+}
+
 func (s *DivisionService) ExportDivisions(c *fiber.Ctx) error {
-	chunkSize := 10000 // adjust the chunk size based on your system's performance
+	chunkSize := 20000 // adjust the chunk size based on your system's performance
 	offset := 0
 
 	// create a channel to receive the exported data
@@ -121,7 +181,7 @@ func (s *DivisionService) ExportDivisions(c *fiber.Ctx) error {
 	csvWriter := csv.NewWriter(writer)
 
 	// write the header row
-	header := []string{"ID", "Name"}
+	header := []string{"Name"}
 	if err := csvWriter.Write(header); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to write CSV header"})
 	}
@@ -161,7 +221,7 @@ func (s *DivisionService) exportDivisionsChunk(divisions []models.Division) ([]b
 
 	// write each division as a row
 	for _, division := range divisions {
-		row := []string{strconv.Itoa(int(division.ID)), division.Name}
+		row := []string{division.Name}
 		if err := writer.Write(row); err != nil {
 			return nil, err
 		}
@@ -213,7 +273,7 @@ func ProcessDivisionCSV(reader io.Reader) error {
 
         // Parse CSV line to model
         division := models.Division{
-            Name: line[1], 
+            Name: line[0], 
             // Add other fields accordingly
         }
 

@@ -5,8 +5,8 @@ import (
 )
 
 type Division struct {
-    ID        uint      `gorm:"primaryKey"`
-    Name      string    `json:"name" gorm:"size:255;not null;unique"` // Add unique constraint
-    CreatedAt time.Time `json:"created_at"`
-    UpdatedAt time.Time `json:"updated_at"`
+    ID        uint           `gorm:"primaryKey"`
+    Name      string         `gorm:"size:255;not null;unique"`
+    CreatedAt time.Time      `gorm:"autoCreateTime"` // Automatically set on creation
+    UpdatedAt time.Time      `gorm:"autoUpdateTime"` // Automatically updated on each update
 }

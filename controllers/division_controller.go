@@ -5,8 +5,8 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
-	"import-export/models"
-	"import-export/services"
+	"ispa-import-export/models"
+	"ispa-import-export/services"
 	"log"
 	"strings" // Make sure this import is included
 )
@@ -80,6 +80,27 @@ func DeleteDivision(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "Division deleted successfully"})
 }
+
+func BulkDeleteDivisions(c *fiber.Ctx) error {
+    rawBody := c.Body()
+    log.Println("Raw body received:", string(rawBody))
+
+    var ids []int
+    if err := c.BodyParser(&ids); err != nil {
+        log.Println("Error parsing body:", err)
+        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+    }
+
+    log.Println("BulkDeleteDivisions IDs:", ids)
+    response, err := services.BulkDeleteDivisionsResponse(ids)
+    if err != nil {
+        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to delete divisions"})
+    }
+
+    return c.Status(fiber.StatusOK).JSON(response)
+}
+
+
 
 
 // ExportDivisions exports all divisions to a CSV file

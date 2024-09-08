@@ -3,7 +3,7 @@ package routes
 
 import (
 	"github.com/gofiber/fiber/v2"
-	"import-export/controllers"
+	"ispa-import-export/controllers"
 )
 
 func RegisterDivisionRoutes(app *fiber.App) {
@@ -13,7 +13,8 @@ func RegisterDivisionRoutes(app *fiber.App) {
 	divisionGroup.Get("/:id", controllers.GetDivisionByID)
 	divisionGroup.Post("/", controllers.CreateDivision)
 	divisionGroup.Put("/:id", controllers.UpdateDivision)
+	divisionGroup.Delete("/bulk-delete", controllers.BulkDeleteDivisions)
 	divisionGroup.Delete("/:id", controllers.DeleteDivision)
     divisionGroup.Post("/import", controllers.ImportDivisions)
-    divisionGroup.Get("/export", controllers.ExportDivisions)
+    divisionGroup.Get("/export/division", controllers.ExportDivisions)
 }
